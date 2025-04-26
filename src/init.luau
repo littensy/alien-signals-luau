@@ -160,7 +160,7 @@ end
 local function endBatch()
 	batchDepth -= 1
 	if batchDepth == 0 then
-		reactive.processEffectNotifications()
+		processEffectNotifications()
 	end
 end
 
