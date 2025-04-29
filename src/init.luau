@@ -1,4 +1,4 @@
-local system = require("./system")
+local system = require("@self/system")
 
 local createReactiveSystem = system.createReactiveSystem
 local SubscriberFlags = system.SubscriberFlags
