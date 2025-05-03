@@ -12,7 +12,7 @@ local signal = signals.signal
 local computed = signals.computed
 local effect = signals.effect
 
-local count, setCount = signal(1)
+local count = signal(1)
 local doubleCount = computed(function()
     return count() * 2
 end)
@@ -23,7 +23,7 @@ end) -- print: "Count is: 1"
 
 print(doubleCount()) -- 2
 
-setCount(2) -- print: "Count is: 2"
+count(2) -- print: "Count is: 2"
 
 print(doubleCount()) -- 4
 ```
@@ -36,7 +36,7 @@ local signal = signals.signal
 local effect = signals.effect
 local effectScope = signals.effectScope
 
-local count, setCount = signal(1)
+local count = signal(1)
 
 local stopScope = effectScope(function()
     effect(function()
@@ -44,11 +44,11 @@ local stopScope = effectScope(function()
     end) -- print: "Count in scope: 1"
 end)
 
-setCount(2) -- print: "Count in scope: 2"
+count(2) -- print: "Count in scope: 2"
 
 stopScope()
 
-setCount(3) -- no print
+count(3) -- no print
 ```
 
 ## Tests

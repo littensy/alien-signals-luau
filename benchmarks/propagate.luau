@@ -1,4 +1,4 @@
-local signals = require("../src")
+local signals = require("../src/lib")
 local bench = require("./bench")
 
 local computed = signals.computed
@@ -10,7 +10,7 @@ local dimensions = { 1, 10, 100 }
 for _, w in dimensions do
 	for _, h in dimensions do
 		bench(`propagate: {w} * {h}`, function()
-			local src, setSrc = signal(1)
+			local src = signal(1)
 			for _ = 1, w do
 				local last = src
 				for _ = 1, h do
@@ -23,7 +23,7 @@ for _, w in dimensions do
 					last()
 				end)
 			end
-			setSrc(src() + 1)
+			src(src() + 1)
 		end)
 	end
 end

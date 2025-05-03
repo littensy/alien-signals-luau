@@ -1,0 +1,13 @@
+name: testing
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.1.2
+
+      - run: sh bin/lint.sh
+      - run: sh bin/test.sh

@@ -1,14 +1,11 @@
-local signals = require("../src")
+local test = require("./suite").test
+local signals = require("../src/lib")
 
 local computed = signals.computed
 local signal = signals.signal
 
-local function getFunctionName()
-	return debug.info(2, "n")
-end
-
-local function shouldPropagateThroughComputed()
-	local src, setSrc = signal(0)
+test("should correctly propagate changes through computed signals", function()
+	local src = signal(0)
 	local c1 = computed(function()
 		return src() % 2
 	end)
@@ -20,38 +17,35 @@ local function shouldPropagateThroughComputed()
 	end)
 
 	c3()
-	setSrc(1)
-	c2()
-	setSrc(3)
+	src(1) -- c1 -> dirty, c2 -> toCheckDirty, c3 -> toCheckDirty
+	c2() -- c1 -> none, c2 -> none
+	src(3) -- c1 -> dirty, c2 -> toCheckDirty
 
-	assert(c3() == 1, getFunctionName())
-end
+	assert(c3() == 1, "bad final value")
+end)
 
-local function shouldPropagateThroughChainedComputations()
-	local src, setSrc = signal(0)
+test("should propagate updated source value through chained computations", function()
+	local src = signal(0)
 	local a = computed(function()
 		return src()
 	end)
-
 	local b = computed(function()
 		return a() % 2
 	end)
-
 	local c = computed(function()
 		return src()
 	end)
-
 	local d = computed(function()
 		return b() + c()
 	end)
 
-	assert(d() == 0, getFunctionName())
-	setSrc(2)
-	assert(d() == 2, getFunctionName())
-end
+	assert(d() == 0, "bad initial value")
+	src(2)
+	assert(d() == 2, "bad updated value")
+end)
 
-local function shouldHandleIndirectDirtyFlagUpdate()
-	local a, setA = signal(false)
+test("should handle flags are indirectly updated during checkDirty", function()
+	local a = signal(false)
 	local b = computed(function()
 		return a()
 	end)
@@ -64,13 +58,25 @@ local function shouldHandleIndirectDirtyFlagUpdate()
 		return b()
 	end)
 
-	assert(d() == false, getFunctionName())
-	setA(true)
-	assert(d() == true, getFunctionName())
-end
+	assert(d() == false, "bad initial value")
+	a(true)
+	assert(d() == true, "bad updated value")
+end)
 
-shouldPropagateThroughComputed()
-shouldPropagateThroughChainedComputations()
-shouldHandleIndirectDirtyFlagUpdate()
+test("should not update if the signal value is reverted", function()
+	local times = 0
+
+	local src = signal(0)
+	local c1 = computed(function()
+		times += 1
+		return src()
+	end)
+	c1()
+	assert(times == 1, "computed did not run")
+	src(1)
+	src(0)
+	c1()
+	assert(times == 1, "computed ran when it should not")
+end)
 
 return {}

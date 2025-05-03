@@ -1,0 +1,1 @@
+lute tests/init.luau

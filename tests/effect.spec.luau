@@ -1,4 +1,5 @@
-local signals = require("../src")
+local test = require("./suite").test
+local signals = require("../src/lib")
 
 local computed = signals.computed
 local effect = signals.effect
@@ -9,81 +10,72 @@ local resumeTracking = signals.resumeTracking
 local signal = signals.signal
 local startBatch = signals.startBatch
 
-local function getFunctionName()
-	return debug.info(2, "n")
-end
-
-local function shouldClearSubscriptionsWhenUntrackedByAllSubscribers()
+test("should clear subscriptions when untracked by all subscribers", function()
 	local bRunTimes = 0
 
-	local getA, setA = signal(1)
+	local a = signal(1)
 	local b = computed(function()
-		bRunTimes = bRunTimes + 1
-		return getA() * 2
+		bRunTimes += 1
+		return a() * 2
 	end)
 	local stopEffect = effect(function()
 		b()
 	end)
 
-	assert(bRunTimes == 1, getFunctionName())
-	setA(2)
-	assert(bRunTimes == 2, getFunctionName())
+	assert(bRunTimes == 1, "should run initially")
+	a(2)
+	assert(bRunTimes == 2, "should run after change")
 	stopEffect()
-	setA(3)
-	assert(bRunTimes == 2, getFunctionName())
-end
+	a(3)
+	assert(bRunTimes == 2, "should not run after stop")
+end)
 
-local function shouldNotRunUntrackedInnerEffect()
-	local getA, setA = signal(3)
+test("should not run untracked inner effect", function()
+	local a = signal(3)
 	local b = computed(function()
-		return getA() > 0
+		return a() > 0
 	end)
-
-	local function decrement()
-		setA(getA() - 1)
-	end
 
 	effect(function()
 		if b() then
 			effect(function()
-				if getA() == 0 then
+				if a() == 0 then
 					error("bad")
 				end
 			end)
 		end
 	end)
 
-	decrement()
-	decrement()
-	decrement()
-end
+	a(2)
+	a(1)
+	a(0)
+end)
 
-local function shouldRunOuterEffectFirst()
-	local getA, setA = signal(1)
-	local getB, setB = signal(1)
+test("should run outer effect first", function()
+	local a = signal(1)
+	local b = signal(1)
 
 	effect(function()
-		if getA() ~= 0 then
+		if a() > 0 then
 			effect(function()
-				getB()
-				if getA() == 0 then
+				b()
+				if a() == 0 then
 					error("bad")
 				end
 			end)
-		else
 		end
 	end)
 
 	startBatch()
-	setB(0)
-	setA(0)
+	b(0)
+	a(0)
 	endBatch()
-end
+end)
 
-local function shouldNotTriggerInnerEffectWhenResolveMaybeDirty()
-	local getA, setA = signal(0)
+test("should not trigger inner effect when resolve maybe dirty", function()
+	local a = signal(0)
 	local b = computed(function()
-		return getA() % 2
+		return a() % 2
 	end)
 
 	local innerTriggerTimes = 0
@@ -91,106 +83,105 @@ local function shouldNotTriggerInnerEffectWhenResolveMaybeDirty()
 	effect(function()
 		effect(function()
 			b()
-			innerTriggerTimes = innerTriggerTimes + 1
+			innerTriggerTimes += 1
 			if innerTriggerTimes >= 2 then
 				error("bad")
 			end
 		end)
 	end)
 
-	setA(2)
-end
+	a(2)
+end)
 
-local function shouldTriggerInnerEffectsInSequence()
-	local getA, setA = signal(0)
-	local getB, setB = signal(0)
+test("should trigger inner effects in sequence", function()
+	local a = signal(0)
+	local b = signal(0)
 	local c = computed(function()
-		return getA() - getB()
+		return a() - b()
 	end)
-	local order = {}
+	local order: { string } = {}
 
 	effect(function()
 		c()
 
 		effect(function()
 			table.insert(order, "first inner")
-			getA()
+			a()
 		end)
 
 		effect(function()
 			table.insert(order, "last inner")
-			getA()
-			getB()
+			a()
+			b()
 		end)
 	end)
 
-	order = {}
+	table.clear(order)
 
 	startBatch()
-	setB(1)
-	setA(1)
+	b(1)
+	a(1)
 	endBatch()
 
-	assert(order[1] == "first inner" and order[2] == "last inner" and #order == 2, getFunctionName())
-end
+	assert(table.concat(order, ", ") == "first inner, last inner", `wrong order: {table.concat(order, ", ")}`)
+end)
 
-local function shouldTriggerInnerEffectsInSequenceInEffectScope()
-	local getA, setA = signal(0)
-	local getB, setB = signal(0)
-	local order = {}
+test("should trigger inner effects in sequence in effect scope", function()
+	local a = signal(0)
+	local b = signal(0)
+	local order: { string } = {}
 
 	effectScope(function()
 		effect(function()
 			table.insert(order, "first inner")
-			getA()
+			a()
 		end)
 
 		effect(function()
 			table.insert(order, "last inner")
-			getA()
-			getB()
+			a()
+			b()
 		end)
 	end)
 
-	order = {}
+	table.clear(order)
 
 	startBatch()
-	setB(1)
-	setA(1)
+	b(1)
+	a(1)
 	endBatch()
 
-	assert(order[1] == "first inner" and order[2] == "last inner" and #order == 2, getFunctionName())
-end
+	assert(table.concat(order, ", ") == "first inner, last inner", `wrong order: {table.concat(order, ", ")}`)
+end)
 
-local function shouldCustomEffectSupportBatch()
-	local function batchEffect(fn)
+test("should custom effect support batch", function()
+	local function batchEffect(fn: () -> ())
 		return effect(function()
 			startBatch()
-			local results = { pcall(fn) }
+			local success, result: unknown = pcall(fn)
 			endBatch()
-			if not results[1] then
-				error(results[2])
+			if not success then
+				error(result)
 			end
-			-- Note: Returning values from pcall result table if needed
-			return table.unpack(results, 2)
 		end)
 	end
 
-	local logs = {}
-	local getA, setA = signal(0)
-	local getB, setB = signal(0)
+	local logs: { string } = {}
+	local a = signal(0)
+	local b = signal(0)
 
 	local aa = computed(function()
 		table.insert(logs, "aa-0")
-		if getA() == 0 then
-			setB(1)
+		if a() == 0 then
+			b(1)
 		end
 		table.insert(logs, "aa-1")
+		return nil
 	end)
 
 	local bb = computed(function()
 		table.insert(logs, "bb")
-		return getB()
+		return b()
 	end)
 
 	batchEffect(function()
@@ -200,67 +191,64 @@ local function shouldCustomEffectSupportBatch()
 		aa()
 	end)
 
-	assert(
-		logs[1] == "bb" and logs[2] == "aa-0" and logs[3] == "aa-1" and logs[4] == "bb" and #logs == 4,
-		getFunctionName()
-	)
-end
+	assert(table.concat(logs, ", ") == "bb, aa-0, aa-1, bb", `wrong order: {table.concat(logs, ", ")}`)
+end)
 
-local function shouldDuplicateSubscribersDoNotAffectTheNotifyOrder()
-	local getSrc1, setSrc1 = signal(0)
-	local getSrc2, setSrc2 = signal(0)
-	local order = {}
+test("should duplicate subscribers do not affect the notify order", function()
+	local src1 = signal(0)
+	local src2 = signal(0)
+	local order: { string } = {}
 
 	effect(function()
 		table.insert(order, "a")
 		pauseTracking()
-		local isOne = getSrc2() == 1
+		local isOne = src2() == 1
 		resumeTracking()
 		if isOne then
-			getSrc1()
+			src1()
 		end
-		getSrc2()
-		getSrc1()
+		src2()
+		src1()
 	end)
 	effect(function()
 		table.insert(order, "b")
-		getSrc1()
+		src1()
 	end)
-	setSrc2(1) -- src1.subs: a -> b -> a
+	src2(1) -- src1.subs: a -> b -> a
 
-	order = {}
-	setSrc1(getSrc1() + 1)
+	table.clear(order)
+	src1(src1() + 1)
 
-	assert(order[1] == "a" and order[2] == "b" and #order == 2, getFunctionName())
-end
+	assert(table.concat(order) == "ab", `wrong order: {table.concat(order)}`)
+end)
 
-local function shouldHandleSideEffectWithInnerEffects()
-	local getA, setA = signal(0)
-	local getB, setB = signal(0)
-	local order = {}
+test("should handle side effect with inner effects", function()
+	local a = signal(0)
+	local b = signal(0)
+	local order: { string } = {}
 
 	effect(function()
 		effect(function()
-			getA()
+			a()
 			table.insert(order, "a")
 		end)
 		effect(function()
-			getB()
+			b()
 			table.insert(order, "b")
 		end)
-		assert(order[1] == "a" and order[2] == "b" and #order == 2, getFunctionName())
+		assert(table.concat(order) == "ab", `wrong order: {table.concat(order)}`)
 
-		order = {}
-		setB(1)
-		setA(1)
-		assert(order[1] == "b" and order[2] == "a" and #order == 2, getFunctionName())
+		table.clear(order)
+		b(1)
+		a(1)
+		assert(table.concat(order) == "ba", `wrong order: {table.concat(order)}`)
 	end)
-end
+end)
 
-local function shouldHandleFlagsAreIndirectlyUpdatedDuringCheckDirty()
-	local getA, setA = signal(false)
+test("should handle flags are indirectly updated during checkDirty", function()
+	local a = signal(false)
 	local b = computed(function()
-		return getA()
+		return a()
 	end)
 	local c = computed(function()
 		b()
@@ -275,22 +263,11 @@ local function shouldHandleFlagsAreIndirectlyUpdatedDuringCheckDirty()
 
 	effect(function()
 		d()
-		triggers = triggers + 1
+		triggers += 1
 	end)
-	assert(triggers == 1, getFunctionName())
-	setA(true)
-	assert(triggers == 2, getFunctionName())
-end
-
-shouldClearSubscriptionsWhenUntrackedByAllSubscribers()
-shouldNotRunUntrackedInnerEffect()
-shouldRunOuterEffectFirst()
-shouldNotTriggerInnerEffectWhenResolveMaybeDirty()
-shouldTriggerInnerEffectsInSequence()
-shouldTriggerInnerEffectsInSequenceInEffectScope()
-shouldCustomEffectSupportBatch()
-shouldDuplicateSubscribersDoNotAffectTheNotifyOrder()
-shouldHandleSideEffectWithInnerEffects()
-shouldHandleFlagsAreIndirectlyUpdatedDuringCheckDirty()
+	assert(triggers == 1, "did not run initially")
+	a(true)
+	assert(triggers == 2, "did not update indirectly")
+end)
 
 return {}
