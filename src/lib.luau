@@ -145,21 +145,23 @@ local function updateComputed(c: Computed): boolean
 	if not success then
 		error(result)
 	end
-	if oldValue == result then
+	if oldValue ~= result then
+		c.value = result
+		return true
+	else
 		return false
 	end
-	c.value = result
-	return true
 end
 
 local function updateSignal(s: Signal, value: any): boolean
 	s.flags = MUTABLE
 	local oldPreviousValue = s.previousValue
-	if oldPreviousValue == value then
+	if oldPreviousValue ~= value then
+		s.previousValue = value
+		return true
+	else
 		return false
 	end
-	s.previousValue = oldPreviousValue
-	return true
 end
 
 local function signalOper<T>(this: Signal<T>, ...: T): T?
