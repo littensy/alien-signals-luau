@@ -155,8 +155,7 @@ end
 
 local function updateSignal(s: Signal, value: any): boolean
 	s.flags = MUTABLE
-	local oldPreviousValue = s.previousValue
-	if oldPreviousValue ~= value then
+	if s.previousValue ~= value then
 		s.previousValue = value
 		return true
 	else
