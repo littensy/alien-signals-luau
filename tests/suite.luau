@@ -44,19 +44,16 @@ local function describe(name: string, callback: () -> ())
 end
 
 local function finish()
-	if #errors == 0 then
-		print(`\n🔵 {tests} tests passed\n`)
-		return
-	end
-
 	print(`\n🔵 {tests - #errors} / {tests} tests passed\n`)
 
 	for _, result in results do
 		print(result)
 	end
 
-	print()
-	error(`{#errors} test(s) failed:\n{table.concat(errors, "\n")}\n`)
+	if #errors > 0 then
+		print()
+		error(`{#errors} test(s) failed:\n{table.concat(errors, "\n")}\n`)
+	end
 end
 
 return {
