@@ -152,7 +152,7 @@ local function updateComputed(c: Computed): boolean
 	return true
 end
 
-function updateSignal(s: Signal, value: any): boolean
+local function updateSignal(s: Signal, value: any): boolean
 	s.flags = MUTABLE
 	local oldPreviousValue = s.previousValue
 	if oldPreviousValue == value then
@@ -283,7 +283,7 @@ local function effectScope(fn: () -> ()): () -> ()
 	return setmetatable(e, effectMetatable) :: any
 end
 
-function notify(e: EffectScope)
+local function notify(e: EffectScope)
 	local flags = e.flags
 	if bit32.band(flags, QUEUED) == 0 then
 		e.flags = bit32.bor(flags, QUEUED)
