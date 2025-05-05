@@ -201,7 +201,8 @@ local function computedGetter<T>(this: Computed<T>): () -> T
 	return function()
 		local flags = this.flags
 		if
-			bit32.band(flags, DIRTY) ~= 0 or (bit32.band(flags, PENDING) ~= 0 and checkDirty(this.deps :: Link, this))
+			bit32.band(flags, DIRTY) ~= 0
+			or (bit32.band(flags, PENDING) ~= 0 and checkDirty(this.deps :: Link, this))
 		then
 			if updateComputed(this) then
 				local subs = this.subs
