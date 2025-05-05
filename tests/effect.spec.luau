@@ -39,10 +39,6 @@ local function shouldNotRunUntrackedInnerEffect()
 		return getA() > 0
 	end)
 
-	local function decrement()
-		setA(getA() - 1)
-	end
-
 	effect(function()
 		if b() then
 			effect(function()
@@ -53,9 +49,9 @@ local function shouldNotRunUntrackedInnerEffect()
 		end
 	end)
 
-	decrement()
-	decrement()
-	decrement()
+	setA(2)
+	setA(1)
+	setA(0)
 end
 
 local function shouldRunOuterEffectFirst()
