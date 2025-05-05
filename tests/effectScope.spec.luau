@@ -1,31 +1,37 @@
-local test = require("./suite").test
-local signals = require("../src/lib")
+local signals = require("../src")
 
 local effect = signals.effect
 local effectScope = signals.effectScope
 local signal = signals.signal
 
-test("should not trigger after stop", function()
-	local count = signal(1)
+local function getFunctionName()
+	return debug.info(2, "n")
+end
+
+local function shouldNotTriggerAfterStop()
+	local getCount, setCount = signal(1)
 
 	local triggers = 0
+	local _effect1
 
 	local stopScope = effectScope(function()
-		effect(function()
+		_effect1 = effect(function()
 			triggers += 1
-			count()
+			getCount()
 		end)
-		assert(triggers == 1, "did not run initially")
+		assert(triggers == 1, getFunctionName())
 
-		count(2)
-		assert(triggers == 2, "did not run after update")
+		setCount(2)
+		assert(triggers == 2, getFunctionName())
 	end)
 
-	count(3)
-	assert(triggers == 3, "did not run after update outside scope")
+	setCount(3)
+	assert(triggers == 3, getFunctionName())
 	stopScope()
-	count(4)
-	assert(triggers == 3, "ran after stop")
-end)
+	setCount(4)
+	assert(triggers == 3, getFunctionName())
+end
+
+shouldNotTriggerAfterStop()
 
 return {}

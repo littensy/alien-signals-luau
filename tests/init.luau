@@ -1,19 +1,8 @@
-local suite = require("./suite")
+require("@self/computed.spec")
+require("@self/effect.spec")
+require("@self/effectScope.spec")
+require("@self/untrack.spec")
+require("@self/issue_48.spec")
+require("@self/topology.spec")
 
-local describe = suite.describe
-local finish = suite.finish
-
-local function test(name: string)
-	describe(name, function()
-		return require(`./{name}.spec`) :: any
-	end)
-end
-
-test("computed")
-test("effect")
-test("effectScope")
-test("issue_48")
-test("topology")
-test("untrack")
-
-finish()
+print("All tests passed!")

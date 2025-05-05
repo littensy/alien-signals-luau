@@ -1,19 +1,10 @@
-local test = require("./suite").test
-local signals = require("../src/lib")
+local signals = require("../src")
 
 local computed = signals.computed
 local effect = signals.effect
 local pauseTracking = signals.pauseTracking
 local resumeTracking = signals.resumeTracking
 local signal = signals.signal
-
-type ReactionOptions<T = unknown> = {
-	fireImmediately: boolean?,
-	equals: ((a: T, b: T?) -> boolean)?,
-	onError: (error: unknown) -> ()?,
-	scheduler: (fn: () -> ()) -> ()?,
-	once: boolean?,
-}
 
 local function untracked<T>(callback: () -> T): T
 	pauseTracking()
@@ -25,60 +16,75 @@ local function untracked<T>(callback: () -> T): T
 	return result
 end
 
+type ReactionOptions<T> = {
+	fireImmediately: boolean?,
+	equals: ((a: T, b: T) -> boolean)?,
+	onError: (error: unknown) -> ()?,
+	scheduler: (fn: () -> ()) -> ()?,
+	once: boolean?,
+}
+
 local function reaction<T>(
 	dataFn: () -> T,
 	effectFn: (newValue: T, oldValue: T?) -> (),
-	options: ReactionOptions<T>?
+	optionsParam: ReactionOptions<T>?
 ): () -> ()
-	local options: ReactionOptions<T> = options or {}
-	local scheduler: (() -> ()) -> () = options.scheduler or function(fn)
-		return fn()
+	local options: ReactionOptions<T> = optionsParam or {}
+	local scheduler = options.scheduler or function(fn: () -> ())
+		fn()
 	end
-	local equals: (T, T?) -> boolean = options.equals or function(a, b)
+	local equals = options.equals or function(a: T, b: T)
 		return a == b
 	end
 	local onError = options.onError
 	local once = options.once or false
 	local fireImmediately = options.fireImmediately or false
 
-	local prevValue: T?
+	local prevValue
 	local version = 0
+	local disposeInnerEffect
 
 	local tracked = computed(function()
-		local success, result = pcall(dataFn)
+		local success, resultOrError = pcall(dataFn)
 		if not success then
 			untracked(function()
 				if onError then
-					onError(result)
+					onError(resultOrError)
 				end
 				return nil
 			end)
 			return prevValue
 		end
-		return result
+		return resultOrError
 	end)
 
-	local dispose
-	dispose = effect(function()
+	local disposeOuterEffect = effect(function()
 		local current = tracked()
 		if not fireImmediately and version == 0 then
 			prevValue = current
 		end
 		version += 1
-		if equals(current :: T, prevValue) then
+		if equals(current, prevValue) then
 			return
 		end
 		local oldValue = prevValue
 		prevValue = current
 		untracked(function()
 			scheduler(function()
-				local success = pcall(effectFn, current :: T, oldValue)
-				if not success and onError then
-					onError(error)
+				local success, err: any = pcall(effectFn, current, oldValue)
+				if not success then
+					if onError then
+						onError(err)
+					end
 				end
 				if once then
-					if (fireImmediately and version > 1) or (not fireImmediately and version > 0) then
-						dispose()
+					if disposeInnerEffect then
+						-- selene: allow(if_same_then_else)
+						if fireImmediately and version > 1 then
+							disposeInnerEffect()
+						elseif not fireImmediately and version > 0 then
+							disposeInnerEffect()
+						end
 					end
 				end
 			end)
@@ -86,12 +92,13 @@ local function reaction<T>(
 		end)
 	end)
 
-	return dispose
+	disposeInnerEffect = disposeOuterEffect
+	return disposeOuterEffect
 end
 
-test("#48", function()
-	local source = signal(0)
-	local disposeInner: () -> ()
+local function issue48()
+	local source, setSource = signal(0)
+	local disposeInner
 
 	reaction(function()
 		return source()
@@ -105,9 +112,11 @@ test("#48", function()
 		end
 	end)
 
-	source(1)
-	source(2)
-	source(3)
-end)
+	setSource(1)
+	setSource(2)
+	setSource(3)
+end
+
+issue48()
 
 return {}

@@ -1,4 +1,4 @@
-std = "selene_defs"
+std = "luau"
 
 [lints]
 shadowing = "allow"
