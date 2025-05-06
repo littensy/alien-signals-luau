@@ -47,7 +47,7 @@ local batchDepth = 0
 local notifyIndex = 0
 local queuedEffectsLength = 0
 local activeSub: ReactiveNode?
-local activeScope: EffectScope?
+local activeScope: Effect | EffectScope?
 
 local function getCurrentSub(): ReactiveNode?
 	return activeSub
@@ -59,11 +59,11 @@ local function setCurrentSub(sub: ReactiveNode?)
 	return prevSub
 end
 
-local function getCurrentScope(): EffectScope?
+local function getCurrentScope(): Effect | EffectScope?
 	return activeScope
 end
 
-local function setCurrentScope(scope: EffectScope?)
+local function setCurrentScope(scope: Effect | EffectScope?)
 	local prevScope = activeScope
 	activeScope = scope
 	return prevScope
