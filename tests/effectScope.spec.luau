@@ -32,6 +32,29 @@ local function shouldNotTriggerAfterStop()
 	assert(triggers == 3, getFunctionName())
 end
 
+local function shouldDisposeInnerEffectsIfCreatedInEffect()
+	local source, setSource = signal(1)
+
+	local triggers = 0
+
+	effect(function()
+		local dispose = effectScope(function()
+			effect(function()
+				source()
+				triggers += 1
+			end)
+		end)
+		assert(triggers == 1, getFunctionName())
+
+		setSource(2)
+		assert(triggers == 2, getFunctionName())
+		dispose()
+		setSource(3)
+		assert(triggers == 2, getFunctionName())
+	end)
+end
+
 shouldNotTriggerAfterStop()
+shouldDisposeInnerEffectsIfCreatedInEffect()
 
 return {}

@@ -31,8 +31,7 @@ type Signal<T = any> = ReactiveNode & {
 }
 
 local pauseStack: { ReactiveNode? } = {}
-local pauseStackCount = 0
-local queuedEffects: { Effect | EffectScope } = {}
+local queuedEffects: { Effect | EffectScope? } = {}
 
 local link: (dep: ReactiveNode, sub: ReactiveNode) -> ()
 local unlink: (link: Link, sub: ReactiveNode?) -> Link?
@@ -123,16 +122,16 @@ local function endBatch()
 	end
 end
 
+--- @deprecated Will be removed in the next major version. Use
+--- `const pausedSub = setCurrentSub(undefined)` instead for better performance.
 local function pauseTracking()
-	pauseStackCount += 1
-	pauseStack[pauseStackCount] = activeSub
-	activeSub = nil
+	table.insert(pauseStack, setCurrentSub(nil))
 end
 
+--- @deprecated Will be removed in the next major version. Use
+--- `setCurrentSub(pausedSub)` instead for better performance.
 local function resumeTracking()
-	activeSub = pauseStack[pauseStackCount]
-	pauseStack[pauseStackCount] = nil
-	pauseStackCount -= 1
+	setCurrentSub(table.remove(pauseStack))
 end
 
 local function updateComputed(c: Computed): boolean
@@ -229,9 +228,8 @@ local function effectStop(this: Effect | EffectScope): () -> ()
 			dep = unlink(dep, this)
 		end
 		local sub = this.subs
-		while sub do
+		if sub then
 			unlink(sub)
-			sub = this.subs
 		end
 		(this :: Effect).flags = NONE
 	end
@@ -278,9 +276,11 @@ local function effectScope(fn: () -> ()): () -> ()
 	if activeScope then
 		link(e, activeScope)
 	end
-	local prev = setCurrentScope(e)
+	local prevSub = setCurrentSub(nil)
+	local prevScope = setCurrentScope(e)
 	local success, result: unknown = pcall(fn)
-	setCurrentScope(prev)
+	setCurrentScope(prevScope)
+	setCurrentSub(prevSub)
 	if not success then
 		error(result)
 	end
@@ -309,20 +309,24 @@ local function notify(e: Effect | EffectScope)
 	end
 end
 
-local function unwatched(signal: Signal | Effect | Computed)
-	local toRemove = signal.deps
-	if toRemove then
-		repeat
-			toRemove = unlink(toRemove, signal)
-		until toRemove == nil
-		(signal :: Signal).flags = bit32.bor(signal.flags, DIRTY)
+local function unwatched(node: Signal | Computed | Effect | EffectScope)
+	if (node :: Computed).getter then
+		local toRemove = node.deps
+		if toRemove then
+			(node :: Computed).flags = bit32.bor(MUTABLE, DIRTY)
+			repeat
+				toRemove = unlink(toRemove, node)
+			until not toRemove
+		end
+	elseif (node :: Signal).previousValue == nil then
+		effectStop(node)()
 	end
 end
 
 local reactiveSystem = createReactiveSystem({
 	update = update :: (ReactiveNode) -> boolean,
 	notify = notify,
-	unwatched = unwatched :: (ReactiveNode) -> (),
+	unwatched = unwatched,
 })
 
 link = reactiveSystem.link
