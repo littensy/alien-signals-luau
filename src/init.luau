@@ -42,7 +42,6 @@ local startTracking: (sub: ReactiveNode) -> ()
 local shallowPropagate: (link: Link) -> ()
 
 local batchDepth = 0
-
 local notifyIndex = 0
 local queuedEffectsLength = 0
 local activeSub: ReactiveNode?
