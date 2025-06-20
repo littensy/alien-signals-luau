@@ -68,7 +68,7 @@ local function setCurrentScope(scope: Effect | EffectScope?)
 end
 
 local function run(e: Effect | EffectScope, flags: ReactiveFlags): ()
-	if bit32.band(flags, DIRTY) ~= 0 or (bit32.band(flags, PENDING) ~= 0 and checkDirty(e.deps :: Link, e)) then
+	if bit32.btest(flags, DIRTY) or (bit32.btest(flags, PENDING) and checkDirty(e.deps :: Link, e)) then
 		local prev = setCurrentSub(e)
 		startTracking(e)
 		local success, result: unknown = pcall((e :: Effect).fn)
@@ -78,14 +78,14 @@ local function run(e: Effect | EffectScope, flags: ReactiveFlags): ()
 			error(result)
 		end
 		return
-	elseif bit32.band(flags, PENDING) ~= 0 then
+	elseif bit32.btest(flags, PENDING) then
 		(e :: Effect).flags = bit32.band(flags, bit32.bnot(PENDING))
 	end
 	local link = e.deps
 	while link do
 		local dep = link.dep
 		local depFlags = dep.flags
-		if bit32.band(depFlags, QUEUED) ~= 0 then
+		if bit32.btest(depFlags, QUEUED) then
 			depFlags = bit32.band(depFlags, bit32.bnot(QUEUED))
 			dep.flags = depFlags
 			run(dep, depFlags)
@@ -164,7 +164,7 @@ end
 local function signalGetterSetter<T>(this: Signal<T>): (() -> T, (value: T) -> ())
 	local function getter(): T
 		local value = this.value
-		if bit32.band(this.flags, DIRTY) ~= 0 then
+		if bit32.btest(this.flags, DIRTY) then
 			if updateSignal(this, value) then
 				local subs = this.subs
 				if subs then
@@ -198,17 +198,14 @@ end
 local function computedGetter<T>(this: Computed<T>): () -> T
 	return function()
 		local flags = this.flags
-		if
-			bit32.band(flags, DIRTY) ~= 0
-			or (bit32.band(flags, PENDING) ~= 0 and checkDirty(this.deps :: Link, this))
-		then
+		if bit32.btest(flags, DIRTY) or (bit32.btest(flags, PENDING) and checkDirty(this.deps :: Link, this)) then
 			if updateComputed(this) then
 				local subs = this.subs
 				if subs then
 					shallowPropagate(subs)
 				end
 			end
-		elseif bit32.band(flags, PENDING) ~= 0 then
+		elseif bit32.btest(flags, PENDING) then
 			this.flags = bit32.band(flags, bit32.bnot(PENDING))
 		end
 		if activeSub then
@@ -296,7 +293,7 @@ end
 
 local function notify(e: Effect | EffectScope)
 	local flags = e.flags
-	if bit32.band(flags, QUEUED) == 0 then
+	if not bit32.btest(flags, QUEUED) then
 		(e :: Effect).flags = bit32.bor(flags, QUEUED)
 		local subs = e.subs
 		if subs then

@@ -4,6 +4,6 @@
 # New tools can be added by running `rokit add <tool>` in a terminal.
 
 [tools]
-lune = "lune-org/lune@0.9.2"
-lute = "luau-lang/lute@0.1.0-nightly.20250505"
+lune = "lune-org/lune@0.9.4"
+lute = "luau-lang/lute@0.1.0-nightly.20250617"
 stylua = "JohnnyMorganz/stylua@2.1.0"
