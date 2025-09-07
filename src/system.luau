@@ -234,11 +234,11 @@ local function createReactiveSystem(props: {
 	local function checkDirty(link: Link, sub: ReactiveNode): boolean
 		local stack: Stack<Link>?
 		local checkDepth = 0
+		local dirty = false
 
 		repeat
 			local dep = link.dep
 			local flags = dep.flags
-			local dirty = false
 
 			if bit32.btest(sub.flags, DIRTY) then
 				dirty = true
@@ -288,6 +288,7 @@ local function createReactiveSystem(props: {
 						sub = link.sub
 						continue
 					end
+					dirty = false
 				else
 					sub.flags = bit32.band(sub.flags, bit32.bnot(PENDING))
 				end
@@ -298,7 +299,6 @@ local function createReactiveSystem(props: {
 					continueTop = true
 					break
 				end
-				dirty = false
 			end
 
 			if continueTop then
