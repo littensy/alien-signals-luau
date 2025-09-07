@@ -52,18 +52,12 @@ local function createReactiveSystem(props: {
 	local currentVersion = 0
 
 	local function isValidLink(checkLink: Link, sub: ReactiveNode): boolean
-		local depsTail = sub.depsTail
-		if depsTail then
-			local link = sub.deps :: Link
-			repeat
-				if link == checkLink then
-					return true
-				end
-				if link == depsTail then
-					break
-				end
-				link = link.nextDep :: Link
-			until not link
+		local link = sub.depsTail
+		while link do
+			if link == checkLink then
+				return true
+			end
+			link = link.prevDep
 		end
 		return false
 	end
