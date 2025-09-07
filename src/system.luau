@@ -267,9 +267,12 @@ local function createReactiveSystem(props: {
 				continue
 			end
 
-			if not dirty and link.nextDep then
-				link = link.nextDep
-				continue
+			if not dirty then
+				local nextDep = link.nextDep
+				if nextDep then
+					link = nextDep
+					continue
+				end
 			end
 
 			local continueTop = false
@@ -296,8 +299,9 @@ local function createReactiveSystem(props: {
 					sub.flags = bit32.band(sub.flags, bit32.bnot(PENDING))
 				end
 				sub = link.sub
-				if link.nextDep then
-					link = link.nextDep
+				local nextDep = link.nextDep
+				if nextDep then
+					link = nextDep
 					continueTop = true
 					break
 				end
