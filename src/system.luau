@@ -172,9 +172,10 @@ local function createReactiveSystem(props: {
 				local subSubs = sub.subs
 				if subSubs then
 					link = subSubs
-					if subSubs.nextSub then
+					local nextSub = link.nextSub
+					if nextSub then
 						stack = { value = next, prev = stack }
-						next = link.nextSub
+						next = nextSub
 					end
 					continue
 				end
