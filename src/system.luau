@@ -150,35 +150,33 @@ local function createReactiveSystem(props: {
 
 			local flags = sub.flags
 
-			if bit32.btest(flags, bit32.bor(MUTABLE, WATCHING)) then
-				if not bit32.btest(flags, bit32.bor(RECURSED_CHECK, RECURSED, DIRTY, PENDING)) then
-					sub.flags = bit32.bor(flags, PENDING)
-				elseif not bit32.btest(flags, bit32.bor(RECURSED_CHECK, RECURSED)) then
-					flags = NONE
-				elseif not bit32.btest(flags, RECURSED_CHECK) then
-					sub.flags = bit32.bor(bit32.band(flags, bit32.bnot(RECURSED)), PENDING)
-				elseif not bit32.btest(flags, bit32.bor(DIRTY, PENDING)) and isValidLink(link, sub) then
-					sub.flags = bit32.bor(flags, bit32.bor(RECURSED, PENDING))
-					flags = bit32.band(flags, MUTABLE)
-				else
-					-- selene: allow(if_same_then_else)
-					flags = NONE
-				end
+			if not bit32.btest(flags, bit32.bor(RECURSED_CHECK, RECURSED, DIRTY, PENDING)) then
+				sub.flags = bit32.bor(flags, PENDING)
+			elseif not bit32.btest(flags, bit32.bor(RECURSED_CHECK, RECURSED)) then
+				flags = NONE
+			elseif not bit32.btest(flags, RECURSED_CHECK) then
+				sub.flags = bit32.bor(bit32.band(flags, bit32.bnot(RECURSED)), PENDING)
+			elseif not bit32.btest(flags, bit32.bor(DIRTY, PENDING)) and isValidLink(link, sub) then
+				sub.flags = bit32.bor(flags, bit32.bor(RECURSED, PENDING))
+				flags = bit32.band(flags, MUTABLE)
+			else
+				-- selene: allow(if_same_then_else)
+				flags = NONE
+			end
 
-				if bit32.btest(flags, WATCHING) then
-					notify(sub)
-				end
+			if bit32.btest(flags, WATCHING) then
+				notify(sub)
+			end
 
-				if bit32.btest(flags, MUTABLE) then
-					local subSubs = sub.subs
-					if subSubs then
-						link = subSubs
-						if subSubs.nextSub then
-							stack = { value = next, prev = stack }
-							next = link.nextSub
-						end
-						continue
+			if bit32.btest(flags, MUTABLE) then
+				local subSubs = sub.subs
+				if subSubs then
+					link = subSubs
+					if subSubs.nextSub then
+						stack = { value = next, prev = stack }
+						next = link.nextSub
 					end
+					continue
 				end
 			end
 
