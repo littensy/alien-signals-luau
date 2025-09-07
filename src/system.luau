@@ -7,6 +7,7 @@ export type ReactiveNode = {
 }
 
 export type Link = {
+	version: number,
 	dep: ReactiveNode,
 	sub: ReactiveNode,
 	prevSub: Link?,
@@ -48,6 +49,7 @@ local function createReactiveSystem(props: {
 	local update = props.update
 	local notify = props.notify
 	local unwatched = props.unwatched
+	local version = 0
 
 	local function isValidLink(checkLink: Link, sub: ReactiveNode): boolean
 		local depsTail = sub.depsTail
@@ -72,16 +74,20 @@ local function createReactiveSystem(props: {
 			return
 		end
 		local nextDep: Link?
-		local recursedCheck = bit32.btest(sub.flags, RECURSED_CHECK)
-		if recursedCheck then
+		if bit32.btest(sub.flags, RECURSED_CHECK) then
 			nextDep = if prevDep then prevDep.nextDep else sub.deps
 			if nextDep and nextDep.dep == dep then
+				nextDep.version = version
 				sub.depsTail = nextDep
 				return
 			end
 		end
 		local prevSub = dep.subsTail
+		if prevSub and prevSub.version == version and prevSub.sub == sub then
+			return
+		end
 		local newLink: Link = {
+			version = version,
 			dep = dep,
 			sub = sub,
 			prevDep = prevDep,
@@ -207,6 +213,7 @@ local function createReactiveSystem(props: {
 	end
 
 	local function startTracking(sub: ReactiveNode): ()
+		version += 1
 		sub.depsTail = nil
 		sub.flags = bit32.bor(bit32.band(sub.flags, bit32.bnot(bit32.bor(RECURSED, DIRTY, PENDING))), RECURSED_CHECK)
 	end
