@@ -226,10 +226,10 @@ local function createReactiveSystem(props: {
 	local function shallowPropagate(link: Link): ()
 		repeat
 			local sub = link.sub
-			local subFlags = sub.flags
-			if bit32.band(subFlags, bit32.bor(PENDING, DIRTY)) == PENDING then
-				sub.flags = bit32.bor(subFlags, DIRTY)
-				if bit32.btest(subFlags, WATCHING) then
+			local flags = sub.flags
+			if bit32.band(flags, bit32.bor(PENDING, DIRTY)) == PENDING then
+				sub.flags = bit32.bor(flags, DIRTY)
+				if bit32.btest(flags, WATCHING) then
 					notify(sub)
 				end
 			end
@@ -243,13 +243,12 @@ local function createReactiveSystem(props: {
 
 		repeat
 			local dep = link.dep
-			local depFlags = dep.flags
-
+			local flags = dep.flags
 			local dirty = false
 
 			if bit32.btest(sub.flags, DIRTY) then
 				dirty = true
-			elseif bit32.band(depFlags, bit32.bor(MUTABLE, DIRTY)) == bit32.bor(MUTABLE, DIRTY) then
+			elseif bit32.band(flags, bit32.bor(MUTABLE, DIRTY)) == bit32.bor(MUTABLE, DIRTY) then
 				if update(dep) then
 					local subs = dep.subs :: Link
 					if subs.nextSub then
@@ -257,7 +256,7 @@ local function createReactiveSystem(props: {
 					end
 					dirty = true
 				end
-			elseif bit32.band(depFlags, bit32.bor(MUTABLE, PENDING)) == bit32.bor(MUTABLE, PENDING) then
+			elseif bit32.band(flags, bit32.bor(MUTABLE, PENDING)) == bit32.bor(MUTABLE, PENDING) then
 				if link.nextSub or link.prevSub then
 					stack = { value = link, prev = stack }
 				end
