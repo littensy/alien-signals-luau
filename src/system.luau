@@ -73,14 +73,11 @@ local function createReactiveSystem(props: {
 		if prevDep and prevDep.dep == dep then
 			return
 		end
-		local nextDep: Link?
-		if bit32.btest(sub.flags, RECURSED_CHECK) then
-			nextDep = if prevDep then prevDep.nextDep else sub.deps
-			if nextDep and nextDep.dep == dep then
-				nextDep.version = version
-				sub.depsTail = nextDep
-				return
-			end
+		local nextDep = if prevDep then prevDep.nextDep else sub.deps
+		if nextDep and nextDep.dep == dep then
+			nextDep.version = version
+			sub.depsTail = nextDep
+			return
 		end
 		local prevSub = dep.subsTail
 		if prevSub and prevSub.version == version and prevSub.sub == sub then
