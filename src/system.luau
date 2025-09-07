@@ -81,9 +81,6 @@ local function createReactiveSystem(props: {
 			end
 		end
 		local prevSub = dep.subsTail
-		if prevSub and prevSub.sub == sub and (not recursedCheck or isValidLink(prevSub, sub)) then
-			return
-		end
 		local newLink: Link = {
 			dep = dep,
 			sub = sub,
