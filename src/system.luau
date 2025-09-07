@@ -49,7 +49,7 @@ local function createReactiveSystem(props: {
 	local update = props.update
 	local notify = props.notify
 	local unwatched = props.unwatched
-	local version = 0
+	local currentVersion = 0
 
 	local function isValidLink(checkLink: Link, sub: ReactiveNode): boolean
 		local depsTail = sub.depsTail
@@ -75,16 +75,16 @@ local function createReactiveSystem(props: {
 		end
 		local nextDep = if prevDep then prevDep.nextDep else sub.deps
 		if nextDep and nextDep.dep == dep then
-			nextDep.version = version
+			nextDep.version = currentVersion
 			sub.depsTail = nextDep
 			return
 		end
 		local prevSub = dep.subsTail
-		if prevSub and prevSub.version == version and prevSub.sub == sub then
+		if prevSub and prevSub.version == currentVersion and prevSub.sub == sub then
 			return
 		end
 		local newLink: Link = {
-			version = version,
+			version = currentVersion,
 			dep = dep,
 			sub = sub,
 			prevDep = prevDep,
@@ -209,7 +209,7 @@ local function createReactiveSystem(props: {
 	end
 
 	local function startTracking(sub: ReactiveNode): ()
-		version += 1
+		currentVersion += 1
 		sub.depsTail = nil
 		sub.flags = bit32.bor(bit32.band(sub.flags, bit32.bnot(bit32.bor(RECURSED, DIRTY, PENDING))), RECURSED_CHECK)
 	end
