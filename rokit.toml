@@ -5,5 +5,5 @@
 
 [tools]
 lune = "lune-org/lune@0.9.4"
-lute = "luau-lang/lute@0.1.0-nightly.20250617"
+lute = "luau-lang/lute@0.1.0-nightly.20251008"
 stylua = "JohnnyMorganz/stylua@2.1.0"
