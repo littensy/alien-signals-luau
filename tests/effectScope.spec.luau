@@ -54,7 +54,25 @@ local function shouldDisposeInnerEffectsIfCreatedInEffect()
 	end)
 end
 
+local function shouldTrackSignalInInnerScopeWhenAccessedByOuterEffect()
+	local source, setSource = signal(1)
+
+	local triggers = 0
+
+	effect(function()
+		effectScope(function()
+			source()
+		end)
+		triggers += 1
+	end)
+
+	assert(triggers == 1, getFunctionName())
+	setSource(2)
+	assert(triggers == 2, getFunctionName())
+end
+
 shouldNotTriggerAfterStop()
 shouldDisposeInnerEffectsIfCreatedInEffect()
+shouldTrackSignalInInnerScopeWhenAccessedByOuterEffect()
 
 return {}

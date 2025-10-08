@@ -2,13 +2,13 @@ local signals = require("../src")
 
 local computed = signals.computed
 local effect = signals.effect
-local setCurrentSub = signals.setCurrentSub
+local setActiveSub = signals.setActiveSub
 local signal = signals.signal
 
 local function untracked<T>(callback: () -> T): T
-	local currentSub = setCurrentSub(nil)
+	local currentSub = setActiveSub(nil)
 	local success, result = pcall(callback)
-	setCurrentSub(currentSub)
+	setActiveSub(currentSub)
 	if not success then
 		error(result)
 	end

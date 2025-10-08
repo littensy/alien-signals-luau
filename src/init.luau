@@ -10,6 +10,7 @@ local createReactiveSystem = system.createReactiveSystem
 local NONE = 0b0000000
 local MUTABLE = 0b0000001
 local WATCHING = 0b0000010
+local RECURSED_CHECK = 0b0000100
 local DIRTY = 0b0010000
 local PENDING = 0b0100000
 local QUEUED = 0b1000000
@@ -30,67 +31,70 @@ type Signal<T = any> = ReactiveNode & {
 	value: T,
 }
 
-local pauseStack: { ReactiveNode? } = {}
-local queuedEffects: { Effect | EffectScope? } = {}
-
-local link: (dep: ReactiveNode, sub: ReactiveNode) -> ()
+local link: (dep: ReactiveNode, sub: ReactiveNode, version: number) -> ()
 local unlink: (link: Link, sub: ReactiveNode?) -> Link?
 local propagate: (link: Link) -> ()
 local checkDirty: (link: Link, sub: ReactiveNode) -> boolean
-local endTracking: (sub: ReactiveNode) -> ()
-local startTracking: (sub: ReactiveNode) -> ()
 local shallowPropagate: (link: Link) -> ()
 
+local cycle = 0
 local batchDepth = 0
 local notifyIndex = 0
+local queuedEffects: { Effect | EffectScope? } = {}
 local queuedEffectsLength = 0
 local activeSub: ReactiveNode?
-local activeScope: Effect | EffectScope?
 
-local function getCurrentSub(): ReactiveNode?
+local function getActiveSub(): ReactiveNode?
 	return activeSub
 end
 
-local function setCurrentSub(sub: ReactiveNode?)
+local function setActiveSub(sub: ReactiveNode?)
 	local prevSub = activeSub
 	activeSub = sub
 	return prevSub
 end
 
-local function getCurrentScope(): Effect | EffectScope?
-	return activeScope
+local function purgeDeps(sub: ReactiveNode)
+	local depsTail = sub.depsTail
+	local toRemove = if depsTail then depsTail.nextDep else sub.deps
+	while toRemove do
+		toRemove = unlink(toRemove, sub)
+	end
 end
 
-local function setCurrentScope(scope: Effect | EffectScope?)
-	local prevScope = activeScope
-	activeScope = scope
-	return prevScope
+local function setNotPending(sub: ReactiveNode, flags: ReactiveFlags)
+	sub.flags = bit32.band(flags, bit32.bnot(PENDING))
 end
 
 local function run(e: Effect | EffectScope, flags: ReactiveFlags): ()
-	if bit32.btest(flags, DIRTY) or (bit32.btest(flags, PENDING) and checkDirty(e.deps :: Link, e)) then
-		local prev = setCurrentSub(e)
-		startTracking(e)
-		local success, result: unknown = pcall((e :: Effect).fn)
-		setCurrentSub(prev)
-		endTracking(e)
+	if
+		bit32.btest(flags, DIRTY)
+		or (bit32.btest(flags, PENDING) and (checkDirty(e.deps :: Link, e) or setNotPending(e, flags)))
+	then
+		local e = e :: Effect
+		cycle += 1
+		e.depsTail = nil
+		e.flags = bit32.bor(WATCHING, RECURSED_CHECK)
+		local prevSub = setActiveSub(e)
+		local success, result: unknown = pcall(e.fn)
+		activeSub = prevSub
+		e.flags = bit32.band(e.flags, bit32.bnot(RECURSED_CHECK))
+		purgeDeps(e)
 		if not success then
 			error(result)
 		end
-		return
-	elseif bit32.btest(flags, PENDING) then
-		(e :: Effect).flags = bit32.band(flags, bit32.bnot(PENDING))
-	end
-	local link = e.deps
-	while link do
-		local dep = link.dep
-		local depFlags = dep.flags
-		if bit32.btest(depFlags, QUEUED) then
-			depFlags = bit32.band(depFlags, bit32.bnot(QUEUED))
-			dep.flags = depFlags
-			run(dep, depFlags)
+	else
+		local link = e.deps
+		while link do
+			local dep = link.dep
+			local depFlags = dep.flags
+			if bit32.btest(depFlags, QUEUED) then
+				depFlags = bit32.band(depFlags, bit32.bnot(QUEUED))
+				dep.flags = depFlags
+				run(dep, depFlags)
+			end
+			link = link.nextDep
 		end
-		link = link.nextDep
 	end
 end
 
@@ -121,25 +125,16 @@ local function endBatch()
 	end
 end
 
---- @deprecated Will be removed in the next major version. Use
---- `const pausedSub = setCurrentSub(undefined)` instead for better performance.
-local function pauseTracking()
-	table.insert(pauseStack, setCurrentSub(nil))
-end
-
---- @deprecated Will be removed in the next major version. Use
---- `setCurrentSub(pausedSub)` instead for better performance.
-local function resumeTracking()
-	setCurrentSub(table.remove(pauseStack))
-end
-
 local function updateComputed(c: Computed): boolean
-	local prevSub = setCurrentSub(c)
-	startTracking(c)
+	cycle += 1
+	c.depsTail = nil
+	c.flags = bit32.bor(MUTABLE, RECURSED_CHECK)
+	local prevSub = setActiveSub(c)
 	local oldValue = c.value
-	local success, result = pcall(c.getter, oldValue)
-	setCurrentSub(prevSub)
-	endTracking(c)
+	local success, result: unknown = pcall(c.getter, oldValue)
+	activeSub = prevSub
+	c.flags = bit32.band(c.flags, bit32.bnot(RECURSED_CHECK))
+	purgeDeps(c)
 	if not success then
 		error(result)
 	end
@@ -172,8 +167,16 @@ local function signalGetterSetter<T>(this: Signal<T>): (() -> T, (value: T) -> (
 				end
 			end
 		end
-		if activeSub then
-			link(this, activeSub)
+		local sub = activeSub
+		while sub do
+			if bit32.btest(sub.flags, bit32.bor(MUTABLE, WATCHING)) then
+				link(this, sub, cycle)
+				break
+			end
+			local subs = sub.subs
+			if subs then
+				sub = subs.sub
+			end
 		end
 		return value
 	end
@@ -198,26 +201,34 @@ end
 local function computedGetter<T>(this: Computed<T>): () -> T
 	return function()
 		local flags = this.flags
-		if bit32.btest(flags, DIRTY) or (bit32.btest(flags, PENDING) and checkDirty(this.deps :: Link, this)) then
+		if
+			bit32.btest(flags, DIRTY)
+			or (bit32.btest(flags, PENDING) and (checkDirty(this.deps :: Link, this) or setNotPending(this, flags)))
+		then
 			if updateComputed(this) then
 				local subs = this.subs
 				if subs then
 					shallowPropagate(subs)
 				end
 			end
-		elseif bit32.btest(flags, PENDING) then
-			this.flags = bit32.band(flags, bit32.bnot(PENDING))
+		elseif flags == NONE then
+			this.flags = MUTABLE
+			local prevSub = setActiveSub(this)
+			local success, result: unknown = pcall(this.getter, this.value)
+			activeSub = prevSub
+			if not success then
+				error(result)
+			end
+			this.value = result :: T
 		end
 		if activeSub then
-			link(this, activeSub)
-		elseif activeScope then
-			link(this, activeScope)
+			link(this, activeSub, cycle)
 		end
 		return this.value :: T
 	end
 end
 
-local function effectStop(this: Effect | EffectScope): () -> ()
+local function effectScopeStop(this: EffectScope): () -> ()
 	return function()
 		local dep = this.deps
 		while dep do
@@ -227,7 +238,14 @@ local function effectStop(this: Effect | EffectScope): () -> ()
 		if sub then
 			unlink(sub)
 		end
-		(this :: Effect).flags = NONE
+	end
+end
+
+local function effectStop(this: Effect): () -> ()
+	local stopEffectScope = effectScopeStop(this)
+	return function()
+		stopEffectScope()
+		this.flags = NONE
 	end
 end
 
@@ -241,7 +259,7 @@ end
 
 local function computed<T>(getter: (previousValue: T?) -> T): () -> T
 	return computedGetter({
-		flags = bit32.bor(MUTABLE, DIRTY),
+		flags = NONE,
 		getter = getter,
 	})
 end
@@ -251,14 +269,12 @@ local function effect(fn: () -> ()): () -> ()
 		fn = fn,
 		flags = WATCHING,
 	}
-	if activeSub then
-		link(e, activeSub)
-	elseif activeScope then
-		link(e, activeScope)
+	local prevSub = setActiveSub(e)
+	if prevSub then
+		link(e, prevSub, 0)
 	end
-	local prev = setCurrentSub(e)
 	local success, result: unknown = pcall(fn)
-	setCurrentSub(prev)
+	activeSub = prevSub
 	if not success then
 		error(result)
 	end
@@ -269,18 +285,16 @@ local function effectScope(fn: () -> ()): () -> ()
 	local e: EffectScope = {
 		flags = NONE,
 	}
-	if activeScope then
-		link(e, activeScope)
+	local prevSub = setActiveSub(e)
+	if prevSub then
+		link(e, prevSub, 0)
 	end
-	local prevSub = setCurrentSub(nil)
-	local prevScope = setCurrentScope(e)
 	local success, result: unknown = pcall(fn)
-	setCurrentScope(prevScope)
-	setCurrentSub(prevSub)
+	activeSub = prevSub
 	if not success then
 		error(result)
 	end
-	return effectStop(e)
+	return effectScopeStop(e)
 end
 
 local function update(signal: Signal | Computed): boolean
@@ -314,8 +328,10 @@ local function unwatched(node: Signal | Computed | Effect | EffectScope)
 				toRemove = unlink(toRemove, node)
 			until not toRemove
 		end
+	elseif (node :: Effect).fn then
+		effectStop(node :: Effect)()
 	elseif (node :: Signal).previousValue == nil then
-		effectStop(node)()
+		effectScopeStop(node)()
 	end
 end
 
@@ -329,22 +345,16 @@ link = reactiveSystem.link
 unlink = reactiveSystem.unlink
 propagate = reactiveSystem.propagate
 checkDirty = reactiveSystem.checkDirty
-endTracking = reactiveSystem.endTracking
-startTracking = reactiveSystem.startTracking
 shallowPropagate = reactiveSystem.shallowPropagate
 
 return {
 	ReactiveFlags = ReactiveFlags,
 	createReactiveSystem = createReactiveSystem,
-	getCurrentSub = getCurrentSub,
-	setCurrentSub = setCurrentSub,
-	getCurrentScope = getCurrentScope,
-	setCurrentScope = setCurrentScope,
+	getActiveSub = getActiveSub,
+	setActiveSub = setActiveSub,
 	getBatchDepth = getBatchDepth,
 	startBatch = startBatch,
 	endBatch = endBatch,
-	pauseTracking = pauseTracking,
-	resumeTracking = resumeTracking,
 	signal = signal,
 	computed = computed,
 	effect = effect,
