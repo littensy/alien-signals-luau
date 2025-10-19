@@ -27,8 +27,8 @@ type Computed<T = any> = ReactiveNode & {
 }
 
 type Signal<T = any> = ReactiveNode & {
-	previousValue: T,
-	value: T,
+	currentValue: T,
+	pendingValue: T,
 }
 
 local link: (dep: ReactiveNode, sub: ReactiveNode, version: number) -> ()
@@ -56,9 +56,9 @@ end
 
 local function purgeDeps(sub: ReactiveNode)
 	local depsTail = sub.depsTail
-	local toRemove = if depsTail then depsTail.nextDep else sub.deps
-	while toRemove do
-		toRemove = unlink(toRemove, sub)
+	local dep = if depsTail then depsTail.nextDep else sub.deps
+	while dep do
+		dep = unlink(dep, sub)
 	end
 end
 
@@ -146,10 +146,11 @@ local function updateComputed(c: Computed): boolean
 	end
 end
 
-local function updateSignal(s: Signal, value: any): boolean
+local function updateSignal(s: Signal): boolean
 	s.flags = MUTABLE
-	if s.previousValue ~= value then
-		s.previousValue = value
+	local pendingValue = s.pendingValue
+	if s.currentValue ~= pendingValue then
+		s.currentValue = pendingValue
 		return true
 	else
 		return false
@@ -158,9 +159,8 @@ end
 
 local function signalGetterSetter<T>(this: Signal<T>): (() -> T, (value: T) -> ())
 	local function getter(): T
-		local value = this.value
 		if bit32.btest(this.flags, DIRTY) then
-			if updateSignal(this, value) then
+			if updateSignal(this) then
 				local subs = this.subs
 				if subs then
 					shallowPropagate(subs)
@@ -178,12 +178,12 @@ local function signalGetterSetter<T>(this: Signal<T>): (() -> T, (value: T) -> (
 				sub = subs.sub
 			end
 		end
-		return value
+		return this.currentValue
 	end
 
-	local function setter(newValue: T)
-		if this.value ~= newValue then
-			this.value = newValue
+	local function setter(value: T)
+		if this.pendingValue ~= value then
+			this.pendingValue = value
 			this.flags = bit32.bor(MUTABLE, DIRTY)
 			local subs = this.subs
 			if subs then
@@ -211,15 +211,6 @@ local function computedGetter<T>(this: Computed<T>): () -> T
 					shallowPropagate(subs)
 				end
 			end
-		elseif flags == NONE then
-			this.flags = MUTABLE
-			local prevSub = setActiveSub(this)
-			local success, result: unknown = pcall(this.getter, this.value)
-			activeSub = prevSub
-			if not success then
-				error(result)
-			end
-			this.value = result :: T
 		end
 		if activeSub then
 			link(this, activeSub, cycle)
@@ -230,36 +221,31 @@ end
 
 local function effectScopeStop(this: EffectScope): () -> ()
 	return function()
-		local dep = this.deps
-		while dep do
-			dep = unlink(dep, this)
-		end
+		this.depsTail = nil
+		this.flags = NONE
+		purgeDeps(this)
 		local sub = this.subs
 		if sub then
-			unlink(sub)
+			unlink(sub, this)
 		end
 	end
 end
 
 local function effectStop(this: Effect): () -> ()
-	local stopEffectScope = effectScopeStop(this)
-	return function()
-		stopEffectScope()
-		this.flags = NONE
-	end
+	return effectScopeStop(this)
 end
 
 local function signal<T>(initialValue: T): (() -> T, (value: T) -> ())
 	return signalGetterSetter({
-		previousValue = initialValue,
-		value = initialValue,
+		currentValue = initialValue,
+		pendingValue = initialValue,
 		flags = MUTABLE,
 	})
 end
 
 local function computed<T>(getter: (previousValue: T?) -> T): () -> T
 	return computedGetter({
-		flags = NONE,
+		flags = bit32.bor(MUTABLE, DIRTY),
 		getter = getter,
 	})
 end
@@ -297,11 +283,11 @@ local function effectScope(fn: () -> ()): () -> ()
 	return effectScopeStop(e)
 end
 
-local function update(signal: Signal | Computed): boolean
-	if (signal :: Computed).getter then
-		return updateComputed(signal :: Computed)
+local function update(node: ReactiveNode): boolean
+	if node.depsTail then
+		return updateComputed(node :: Computed)
 	else
-		return updateSignal(signal :: Signal, signal.value)
+		return updateSignal(node :: Signal)
 	end
 end
 
@@ -319,24 +305,18 @@ local function notify(e: Effect | EffectScope)
 	end
 end
 
-local function unwatched(node: Signal | Computed | Effect | EffectScope)
-	if (node :: Computed).getter then
-		local toRemove = node.deps
-		if toRemove then
-			(node :: Computed).flags = bit32.bor(MUTABLE, DIRTY)
-			repeat
-				toRemove = unlink(toRemove, node)
-			until not toRemove
-		end
-	elseif (node :: Effect).fn then
-		effectStop(node :: Effect)()
-	elseif (node :: Signal).previousValue == nil then
+local function unwatched(node: ReactiveNode)
+	if bit32.band(node.flags, MUTABLE) == 0 then
 		effectScopeStop(node)()
+	elseif node.depsTail then
+		node.depsTail = nil
+		node.flags = bit32.bor(MUTABLE, DIRTY)
+		purgeDeps(node)
 	end
 end
 
 local reactiveSystem = createReactiveSystem({
-	update = update :: (ReactiveNode) -> boolean,
+	update = update,
 	notify = notify,
 	unwatched = unwatched,
 })
