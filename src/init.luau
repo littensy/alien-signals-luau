@@ -13,9 +13,6 @@ local WATCHING = 0b0000010
 local RECURSED_CHECK = 0b0000100
 local DIRTY = 0b0010000
 local PENDING = 0b0100000
-local QUEUED = 0b1000000
-
-type EffectScope = ReactiveNode
 
 type Effect = ReactiveNode & {
 	fn: () -> (),
@@ -40,8 +37,8 @@ local shallowPropagate: (link: Link) -> ()
 local cycle = 0
 local batchDepth = 0
 local notifyIndex = 0
-local queuedEffects: { Effect | EffectScope? } = {}
-local queuedEffectsLength = 0
+local queued: { Effect? } = {}
+local queuedLength = 0
 local activeSub: ReactiveNode?
 
 local function getActiveSub(): ReactiveNode?
@@ -66,12 +63,9 @@ local function setNotPending(sub: ReactiveNode, flags: ReactiveFlags)
 	sub.flags = bit32.band(flags, bit32.bnot(PENDING))
 end
 
-local function run(e: Effect | EffectScope, flags: ReactiveFlags): ()
-	if
-		bit32.btest(flags, DIRTY)
-		or (bit32.btest(flags, PENDING) and (checkDirty(e.deps :: Link, e) or setNotPending(e, flags)))
-	then
-		local e = e :: Effect
+local function run(e: Effect): ()
+	local flags = e.flags
+	if bit32.btest(flags, DIRTY) or (bit32.btest(flags, PENDING) and checkDirty(e.deps :: Link, e)) then
 		cycle += 1
 		e.depsTail = nil
 		e.flags = bit32.bor(WATCHING, RECURSED_CHECK)
@@ -84,30 +78,19 @@ local function run(e: Effect | EffectScope, flags: ReactiveFlags): ()
 			error(result)
 		end
 	else
-		local link = e.deps
-		while link do
-			local dep = link.dep
-			local depFlags = dep.flags
-			if bit32.btest(depFlags, QUEUED) then
-				depFlags = bit32.band(depFlags, bit32.bnot(QUEUED))
-				dep.flags = depFlags
-				run(dep, depFlags)
-			end
-			link = link.nextDep
-		end
+		e.flags = WATCHING
 	end
 end
 
 local function flush(): ()
-	while notifyIndex < queuedEffectsLength do
+	while notifyIndex < queuedLength do
+		local effect = queued[notifyIndex] :: Effect
+		queued[notifyIndex] = nil
 		notifyIndex += 1
-		local effect = queuedEffects[notifyIndex] :: Effect
-		queuedEffects[notifyIndex] = nil
-		effect.flags = bit32.band(effect.flags, bit32.bnot(QUEUED))
-		run(effect, effect.flags)
+		run(effect)
 	end
 	notifyIndex = 0
-	queuedEffectsLength = 0
+	queuedLength = 0
 end
 
 local function getBatchDepth(): number
@@ -174,9 +157,7 @@ local function signalGetterSetter<T>(this: Signal<T>): (() -> T, (value: T) -> (
 				break
 			end
 			local subs = sub.subs
-			if subs then
-				sub = subs.sub
-			end
+			sub = if subs then subs.sub else nil
 		end
 		return this.currentValue
 	end
@@ -211,6 +192,16 @@ local function computedGetter<T>(this: Computed<T>): () -> T
 					shallowPropagate(subs)
 				end
 			end
+		elseif flags == NONE then
+			this.flags = MUTABLE
+			local prevSub = setActiveSub(this)
+			local success, result = pcall(this.getter)
+			activeSub = prevSub
+			if success then
+				this.value = result
+			else
+				error(result)
+			end
 		end
 		if activeSub then
 			link(this, activeSub, cycle)
@@ -219,7 +210,7 @@ local function computedGetter<T>(this: Computed<T>): () -> T
 	end
 end
 
-local function effectScopeStop(this: EffectScope): () -> ()
+local function effectScopeStop(this: ReactiveNode): () -> ()
 	return function()
 		this.depsTail = nil
 		this.flags = NONE
@@ -245,7 +236,7 @@ end
 
 local function computed<T>(getter: (previousValue: T?) -> T): () -> T
 	return computedGetter({
-		flags = bit32.bor(MUTABLE, DIRTY),
+		flags = NONE,
 		getter = getter,
 	})
 end
@@ -268,7 +259,7 @@ local function effect(fn: () -> ()): () -> ()
 end
 
 local function effectScope(fn: () -> ()): () -> ()
-	local e: EffectScope = {
+	local e: ReactiveNode = {
 		flags = NONE,
 	}
 	local prevSub = setActiveSub(e)
@@ -283,42 +274,48 @@ local function effectScope(fn: () -> ()): () -> ()
 	return effectScopeStop(e)
 end
 
-local function update(node: ReactiveNode): boolean
-	if node.depsTail then
-		return updateComputed(node :: Computed)
-	else
-		return updateSignal(node :: Signal)
-	end
-end
-
-local function notify(e: Effect | EffectScope)
-	local flags = e.flags
-	if not bit32.btest(flags, QUEUED) then
-		(e :: Effect).flags = bit32.bor(flags, QUEUED)
-		local subs = e.subs
-		if subs then
-			notify(subs.sub)
-		else
-			queuedEffectsLength += 1
-			queuedEffects[queuedEffectsLength] = e
-		end
-	end
-end
-
-local function unwatched(node: ReactiveNode)
-	if bit32.band(node.flags, MUTABLE) == 0 then
-		effectScopeStop(node)()
-	elseif node.depsTail then
-		node.depsTail = nil
-		node.flags = bit32.bor(MUTABLE, DIRTY)
-		purgeDeps(node)
-	end
-end
-
 local reactiveSystem = createReactiveSystem({
-	update = update,
-	notify = notify,
-	unwatched = unwatched,
+	update = function(node)
+		if node.depsTail then
+			return updateComputed(node :: Computed)
+		else
+			return updateSignal(node :: Signal)
+		end
+	end,
+	notify = function(effect)
+		local insertIndex = queuedLength
+		local firstInsertedIndex = insertIndex
+
+		repeat
+			effect.flags = bit32.band(effect.flags, bit32.bnot(WATCHING))
+			queued[insertIndex] = effect :: Effect
+			insertIndex += 1
+			effect = (effect.subs and effect.subs.sub) :: Effect
+			if not effect or bit32.band(effect.flags, WATCHING) == 0 then
+				break
+			end
+		until false
+
+		queuedLength = insertIndex
+
+		insertIndex -= 1
+		while firstInsertedIndex < insertIndex do
+			local left = queued[firstInsertedIndex]
+			queued[firstInsertedIndex] = queued[insertIndex]
+			queued[insertIndex] = left
+			firstInsertedIndex += 1
+			insertIndex -= 1
+		end
+	end,
+	unwatched = function(node)
+		if bit32.band(node.flags, MUTABLE) == 0 then
+			effectScopeStop(node)()
+		elseif node.depsTail then
+			node.depsTail = nil
+			node.flags = bit32.bor(MUTABLE, DIRTY)
+			purgeDeps(node)
+		end
+	end,
 })
 
 link = reactiveSystem.link

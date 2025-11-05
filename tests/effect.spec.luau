@@ -95,65 +95,63 @@ local function shouldNotTriggerInnerEffectWhenResolveMaybeDirty()
 	setA(2)
 end
 
-local function shouldTriggerInnerEffectsInSequence()
+local function shouldNotifyInnerEffectsInSameOrderAsNonInnerEffects()
 	local getA, setA = signal(0)
 	local getB, setB = signal(0)
 	local c = computed(function()
 		return getA() - getB()
 	end)
-	local order = {}
+	local order1 = {}
+	local order2 = {}
+	local order3 = {}
+
+	effect(function()
+		table.insert(order1, "effect1")
+		getA()
+	end)
+	effect(function()
+		table.insert(order1, "effect2")
+		getA()
+		getB()
+	end)
 
 	effect(function()
 		c()
-
 		effect(function()
-			table.insert(order, "first inner")
+			table.insert(order2, "effect1")
 			getA()
 		end)
-
 		effect(function()
-			table.insert(order, "last inner")
+			table.insert(order2, "effect2")
 			getA()
 			getB()
 		end)
 	end)
-
-	order = {}
-
-	startBatch()
-	setB(1)
-	setA(1)
-	endBatch()
-
-	assert(order[1] == "first inner" and order[2] == "last inner" and #order == 2, getFunctionName())
-end
-
-local function shouldTriggerInnerEffectsInSequenceInEffectScope()
-	local getA, setA = signal(0)
-	local getB, setB = signal(0)
-	local order = {}
 
 	effectScope(function()
 		effect(function()
-			table.insert(order, "first inner")
+			table.insert(order3, "effect1")
 			getA()
 		end)
-
 		effect(function()
-			table.insert(order, "last inner")
+			table.insert(order3, "effect2")
 			getA()
 			getB()
 		end)
 	end)
 
-	order = {}
+	table.clear(order1)
+	table.clear(order2)
+	table.clear(order3)
 
 	startBatch()
 	setB(1)
 	setA(1)
 	endBatch()
 
-	assert(order[1] == "first inner" and order[2] == "last inner" and #order == 2, getFunctionName())
+	assert(table.concat(order1, ", ") == "effect2, effect1", getFunctionName())
+	assert(table.concat(order2, ", ") == "effect2, effect1", getFunctionName())
+	assert(table.concat(order3, ", ") == "effect2, effect1", getFunctionName())
 end
 
 local function shouldCustomEffectSupportBatch()
@@ -281,8 +279,7 @@ shouldClearSubscriptionsWhenUntrackedByAllSubscribers()
 shouldNotRunUntrackedInnerEffect()
 shouldRunOuterEffectFirst()
 shouldNotTriggerInnerEffectWhenResolveMaybeDirty()
-shouldTriggerInnerEffectsInSequence()
-shouldTriggerInnerEffectsInSequenceInEffectScope()
+shouldNotifyInnerEffectsInSameOrderAsNonInnerEffects()
 shouldCustomEffectSupportBatch()
 shouldDuplicateSubscribersDoNotAffectTheNotifyOrder()
 shouldHandleSideEffectWithInnerEffects()
